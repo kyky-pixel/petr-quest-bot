@@ -1,0 +1,163 @@
+﻿from aiogram import Router, F
+from aiogram.filters import Command
+from aiogram.types import Message, CallbackQuery
+from aiogram.fsm.state import StatesGroup, State
+from aiogram.fsm.context import FSMContext
+
+from ..db import get_db
+from ..levels import progress_at
+from ..keyboards import main_menu_kb, quest_actions_kb
+
+player_router = Router()
+
+class SubmitQuest(StatesGroup):
+    waiting_note = State()  # ждём текст отчёта
+
+# --- Команды/меню ---
+
+@player_router.message(Command("start"))
+async def start_cmd(m: Message):
+    async with get_db() as db:
+        cur = await db.execute("SELECT id FROM users WHERE tg_id=?", (m.from_user.id,))
+        row = await cur.fetchone()
+        if not row:
+            await db.execute(
+                "INSERT INTO users(tg_id, name) VALUES(?,?)",
+                (m.from_user.id, f"@{m.from_user.username}" if m.from_user.username else m.from_user.full_name)
+            )
+            await db.commit()
+    await m.reply("Привет! Я квест-бот. Жми кнопки ниже 👇", reply_markup=main_menu_kb())
+
+@player_router.message(Command("menu"))
+async def menu_cmd(m: Message):
+    await m.reply("Главное меню:", reply_markup=main_menu_kb())
+
+@player_router.message(F.text.in_(["📊 Профиль", "Профиль"]))
+@player_router.message(Command("profile"))
+async def profile_cmd(m: Message):
+    async with get_db() as db:
+        cur = await db.execute(
+            "SELECT id, level, total_xp, current_streak, longest_streak FROM users WHERE tg_id=?",
+            (m.from_user.id,)
+        )
+        row = await cur.fetchone()
+        if not row:
+            return await m.reply("Сначала сделай /start")
+        uid, level, total_xp, cs, ls = row
+
+    base, need, have, pct = progress_at(total_xp, level)
+    filled = int(round(pct / 10))
+    bar = "█" * filled + "░" * (10 - filled)
+    to_next = max(0, need - have)
+
+    msg = (
+        "Профиль\n"
+        f"Уровень: {level}\n"
+        f"Опыт: {total_xp} (до след. уровня: {to_next})\n"
+        f"Прогресс: [{bar}] {pct:.0f}%\n"
+        f"Серия: {cs} (рекорд {ls})"
+    )
+    await m.reply(msg, reply_markup=main_menu_kb())
+
+@player_router.message(F.text.in_(["🗺 Квесты", "Квесты"]))
+@player_router.message(Command("quests"))
+async def quests_cmd(m: Message):
+    async with get_db() as db:
+        cur_uid = await db.execute("SELECT id FROM users WHERE tg_id=?", (m.from_user.id,))
+        uid_row = await cur_uid.fetchone()
+        if not uid_row:
+            return await m.reply("Сначала /start", reply_markup=main_menu_kb())
+        uid = uid_row[0]
+        cur = await db.execute(
+            "SELECT id, title, base_xp, state FROM quests "
+            "WHERE assigned_to=? AND state IN ('pending','accepted','submitted') "
+            "ORDER BY id DESC",
+            (uid,)
+        )
+        rows = await cur.fetchall()
+    if not rows:
+        return await m.reply("Пока нет активных квестов", reply_markup=main_menu_kb())
+
+    # Покажем каждый квест отдельным сообщением с кнопками
+    for (qid, title, xp, state) in rows:
+        text = f"#{qid} — {title}\nXP: +{xp}\nСтатус: {state}"
+        await m.answer(text, reply_markup=quest_actions_kb(qid, state))
+
+# --- Приём текстовой команды /done (оставляем как было, на всякий случай) ---
+
+@player_router.message(Command("done"))
+async def done_cmd(m: Message):
+    parts = m.text.split(maxsplit=2)
+    if len(parts) < 2:
+        return await m.reply("Формат: /done <id> краткий_отчёт")
+    qid = int(parts[1])
+    note = parts[2] if len(parts) > 2 else ""
+    await _submit_quest(m.from_user.id, qid, note, m)
+
+# --- Callback-кнопки: Принять/Сдать ---
+
+@player_router.callback_query(F.data.startswith("q:accept:"))
+async def cb_accept(c: CallbackQuery):
+    qid = int(c.data.split(":")[2])
+    async with get_db() as db:
+        # проверим принадлежность квеста
+        cur = await db.execute("SELECT assigned_to, state FROM quests WHERE id=?", (qid,))
+        row = await cur.fetchone()
+        if not row:
+            return await c.answer("Квест не найден", show_alert=True)
+        assigned_to, state = row
+        cur = await db.execute("SELECT id FROM users WHERE tg_id=?", (c.from_user.id,))
+        uid_row = await cur.fetchone()
+        if not uid_row or uid_row[0] != assigned_to:
+            return await c.answer("Квест не ваш", show_alert=True)
+        if state not in ("pending",):
+            return await c.answer("Нельзя принять в текущем состоянии", show_alert=True)
+        await db.execute("UPDATE quests SET state='accepted' WHERE id=?", (qid,))
+        await db.commit()
+    await c.answer("Квест принят ✅")
+    # Обновим карточку
+    await c.message.edit_reply_markup(reply_markup=quest_actions_kb(qid, "accepted"))
+
+@player_router.callback_query(F.data.startswith("q:submit:"))
+async def cb_submit(c: CallbackQuery, state: FSMContext):
+    qid = int(c.data.split(":")[2])
+    # сохраним qid и попросим текст
+    await state.set_state(SubmitQuest.waiting_note)
+    await state.update_data(qid=qid)
+    await c.answer()
+    await c.message.reply(f"Напиши короткий отчёт по квесту #{qid} в следующем сообщении.")
+    
+@player_router.message(SubmitQuest.waiting_note)
+async def collect_note(m: Message, state: FSMContext):
+    data = await state.get_data()
+    qid = data.get("qid")
+    note = m.text or ""
+    await _submit_quest(m.from_user.id, qid, note, m)
+    await state.clear()
+
+# --- Вспомогательная функция отправки сабмита ---
+async def _submit_quest(tg_user_id: int, qid: int, note: str, m: Message):
+    async with get_db() as db:
+        cur = await db.execute("SELECT id FROM users WHERE tg_id=?", (tg_user_id,))
+        uid_row = await cur.fetchone()
+        if not uid_row:
+            return await m.reply("Сначала /start", reply_markup=main_menu_kb())
+        uid = uid_row[0]
+
+        cur = await db.execute("SELECT id, state, assigned_to FROM quests WHERE id=?", (qid,))
+        row = await cur.fetchone()
+        if not row:
+            return await m.reply("Квест не найден")
+        _, state, assigned_to = row
+        if assigned_to != uid:
+            return await m.reply("Этот квест не назначен вам")
+        if state not in ("pending", "accepted"):
+            return await m.reply("Квест нельзя сдать в текущем состоянии")
+
+        await db.execute("UPDATE quests SET state='submitted' WHERE id=?", (qid,))
+        await db.execute(
+            "INSERT INTO submissions(quest_id, user_id, text) VALUES(?,?,?)",
+            (qid, uid, note)
+        )
+        await db.commit()
+    await m.reply("Отправлено на проверку. Ждём подтверждения.")
