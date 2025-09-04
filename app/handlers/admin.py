@@ -63,7 +63,7 @@ async def pending_review(m: Message):
         await m.answer(f"#{qid} — {title} (от {uname}) +{xp} XP", reply_markup=admin_review_kb(qid))
 
 # =========================
-#    ВЫДАТЬ (временно — мне)
+#    ВЫДАТЬ (временно — МНЕ)
 # =========================
 class GivePetr(StatesGroup):
     wait_title = State()
@@ -91,33 +91,23 @@ async def give_finish(m: Message, state: FSMContext):
     except Exception:
         xp = 10
 
-    # 1) пробуем settings.default_assignee_username (если он задан и юзер в базе)
-    username = getattr(settings, "default_assignee_username", None)
-
+    # ЖЁСТКИЙ РЕЖИМ: назначаем квест именно автору команды
     async with get_db() as db:
-        assigned_user_id = None
-        assigned_tg_id = None
-
-        if username:
-            cur = await db.execute("SELECT id, tg_id FROM users WHERE name=?", (username,))
-            row = await cur.fetchone()
-            if row:
-                assigned_user_id, assigned_tg_id = row[0], row[1]
-
-        # 2) fallback: если нет username/Пётр не найден — выдаём КОМУ НАЖАЛ КНОПКУ
-        if not assigned_user_id:
-            cur_self = await db.execute("SELECT id, tg_id FROM users WHERE tg_id=?", (m.from_user.id,))
+        # убеждаемся, что автор есть в users
+        cur_self = await db.execute("SELECT id, tg_id, name FROM users WHERE tg_id=?", (m.from_user.id,))
+        self_row = await cur_self.fetchone()
+        if not self_row:
+            await db.execute(
+                "INSERT INTO users(tg_id, name) VALUES(?,?)",
+                (m.from_user.id, f"@{m.from_user.username}" if m.from_user.username else m.from_user.full_name)
+            )
+            await db.commit()
+            cur_self = await db.execute("SELECT id, tg_id, name FROM users WHERE tg_id=?", (m.from_user.id,))
             self_row = await cur_self.fetchone()
-            if not self_row:
-                await db.execute(
-                    "INSERT INTO users(tg_id, name) VALUES(?,?)",
-                    (m.from_user.id, f"@{m.from_user.username}" if m.from_user.username else m.from_user.full_name)
-                )
-                await db.commit()
-                cur_self = await db.execute("SELECT id, tg_id FROM users WHERE tg_id=?", (m.from_user.id,))
-                self_row = await cur_self.fetchone()
-            assigned_user_id, assigned_tg_id = self_row[0], self_row[1]
 
+        assigned_user_id, assigned_tg_id = self_row[0], self_row[1]
+
+        # создаём квест
         await db.execute(
             "INSERT INTO quests(title, flavor_text, base_xp, tag, deadline_at, state, created_by, assigned_to) "
             "VALUES(?,?,?,?,?,'pending',?,?)",
@@ -130,7 +120,7 @@ async def give_finish(m: Message, state: FSMContext):
     await state.clear()
     await m.reply(f"Квест выдан: #{qid} {title} (+{xp} XP)")
 
-    # уведомим исполнителя
+    # Уведомление исполнителю (тебе)
     try:
         await m.bot.send_message(
             assigned_tg_id,
@@ -200,5 +190,3 @@ async def qa_reject(c: CallbackQuery):
             )
         except Exception as e:
             logging.error(f"Не смог отправить игроку реджект: {e}")
-
-# Текстовые дублёры /approve /reject — по желанию
