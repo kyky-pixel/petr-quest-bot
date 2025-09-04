@@ -51,3 +51,4 @@ def admin_review_kb(qid: int) -> InlineKeyboardMarkup:
         InlineKeyboardButton(text="❌ Отклонить",   callback_data=f"qa:reject:{qid}")
     ]])
 
+
