@@ -113,3 +113,5 @@ async def ping(m: Message):
     if not is_admin(m.from_user.id):
         return
     await m.reply("pong")
+
+

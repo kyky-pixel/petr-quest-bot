@@ -36,7 +36,7 @@ def quest_actions_kb(qid: int, state: str) -> InlineKeyboardMarkup:
 def admin_main_kb() -> ReplyKeyboardMarkup:
     return ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="➕ Выдать Пете")],
+            [KeyboardButton(text="➕ Выдать (временно — мне)")],
             [KeyboardButton(text="📝 Ожидают проверки")],
         ],
         resize_keyboard=True,
@@ -50,3 +50,4 @@ def admin_review_kb(qid: int) -> InlineKeyboardMarkup:
         InlineKeyboardButton(text="✅ Подтвердить", callback_data=f"qa:approve:{qid}"),
         InlineKeyboardButton(text="❌ Отклонить",   callback_data=f"qa:reject:{qid}")
     ]])
+
