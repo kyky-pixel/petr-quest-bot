@@ -255,3 +255,45 @@ async def quests_cmd_all(m: Message):
 @player_router.message(F.text == "Квесты")
 async def quests_text_btn(m: Message):
     await _send_my_quests(m)
+from aiogram.filters import Command
+from aiogram.types import Message
+from ..db import get_db
+from ..keyboards import quest_actions_kb
+
+async def _send_my_quests(m: Message):
+    async with get_db() as db:
+        cur = await db.execute(
+            """
+            SELECT q.id, q.title, q.state, q.base_xp
+            FROM quests q
+            JOIN users u ON u.id = q.assigned_to
+            WHERE u.tg_id = ? AND q.state IN ('pending','accepted','submitted')
+            ORDER BY q.id DESC
+            """,
+            (m.from_user.id,)
+        )
+        rows = await cur.fetchall()
+
+    if not rows:
+        return await m.reply("Пока нет активных/ожидающих квестов.")
+
+    # отправляем карточки с правильными кнопками для текущего состояния
+    for qid, title, state, xp in rows:
+        await m.reply(
+            f"#{qid} — {title}\nСтатус: {state}\nXP: +{xp}",
+            reply_markup=quest_actions_kb(qid, state)
+        )
+
+@player_router.message(Command("inbox"))
+async def inbox_cmd(m: Message):
+    await _send_my_quests(m)
+
+@player_router.message(Command("quests"))
+async def quests_cmd_all(m: Message):
+    await _send_my_quests(m)
+
+# нажатие кнопки "Квесты" в меню
+@player_router.message(F.text == "🗺️ Квесты")
+@player_router.message(F.text == "Квесты")
+async def quests_text_btn(m: Message):
+    await _send_my_quests(m)
