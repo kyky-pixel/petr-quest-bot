@@ -125,7 +125,7 @@ async def give_finish(m: Message, state: FSMContext):
         logging.error(f"Не удалось уведомить исполнителя {assigned_tg_id}: {e}")
 
 # ------------- REVIEW: Approve / Reject -------------
-@admin_router.callback_query(F.data.startswith("qa:approve:DISABLEDDISABLEDDISABLED"))
+@admin_router.callback_query(F.data.startswith("qa:approve:DISABLED_ALL"))
 async def qa_approve(c: CallbackQuery):
     qid = int(c.data.split(":")[2])
     async with get_db() as db:
@@ -163,7 +163,7 @@ async def qa_approve(c: CallbackQuery):
         except Exception as e:
             logging.error(f"Не смог отправить игроку апрув: {e}")
 
-@admin_router.callback_query(F.data.startswith("qa:reject:DISABLEDDISABLEDDISABLED"))
+@admin_router.callback_query(F.data.startswith("qa:reject:DISABLED_ALL"))
 async def qa_reject(c: CallbackQuery):
     qid = int(c.data.split(":")[2])
     async with get_db() as db:
@@ -196,11 +196,11 @@ async def qa_reject(c: CallbackQuery):
         except Exception as e:
             logging.error(f"Не смог отправить игроку реджект: {e}")
 # --- extra logs for approve/reject clicks ---
-@admin_router.callback_query(F.data.startswith("qa:approve:DISABLEDDISABLEDDISABLED"))
+@admin_router.callback_query(F.data.startswith("qa:approve:DISABLED_ALL"))
 async def __patch_log_approve(c: CallbackQuery):
     logging.info(f"[ADMIN] approve click from={c.from_user.id} data={c.data}")
 
-@admin_router.callback_query(F.data.startswith("qa:reject:DISABLEDDISABLEDDISABLED"))
+@admin_router.callback_query(F.data.startswith("qa:reject:DISABLED_ALL"))
 async def __patch_log_reject(c: CallbackQuery):
     logging.info(f"[ADMIN] reject click from={c.from_user.id} data={c.data}")
 
@@ -209,7 +209,7 @@ async def __patch_log_reject(c: CallbackQuery):
 from aiogram import F
 from aiogram.types import CallbackQuery
 
-@admin_router.callback_query(F.data.startswith("qa:approve:DISABLED"))
+@admin_router.callback_query(F.data.startswith("qa:approve:DISABLED_ALL"))
 async def qa_approve(c: CallbackQuery):
     logging.info(f"[APPROVE] click data={c.data} from={c.from_user.id}")
     qid = int(c.data.split(":")[2])
@@ -241,7 +241,7 @@ async def qa_approve(c: CallbackQuery):
         except Exception as e:
             logging.error(f"notify approve failed: {e}")
 
-@admin_router.callback_query(F.data.startswith("qa:reject:DISABLED"))
+@admin_router.callback_query(F.data.startswith("qa:reject:DISABLED_ALL"))
 async def qa_reject(c: CallbackQuery):
     logging.info(f"[REJECT] click data={c.data} from={c.from_user.id}")
     qid = int(c.data.split(":")[2])
@@ -279,7 +279,7 @@ async def qa_reject(c: CallbackQuery):
 from aiogram import F
 from aiogram.types import CallbackQuery
 
-@admin_router.callback_query(F.data.startswith("qa:approve:"))
+@admin_router.callback_query(F.data.startswith("qa:approve:DISABLED_ALL"))
 async def qa_approve_notify(c: CallbackQuery):
     logging.info(f"[APPROVE] click data={c.data} from={c.from_user.id}")
     try:
@@ -328,7 +328,7 @@ async def qa_approve_notify(c: CallbackQuery):
             await c.bot.send_message(tg_id, text)
         except Exception as e:
             logging.error(f"[APPROVE] player notify error: {e}")
-@admin_router.callback_query(F.data.startswith("qa:reject:"))
+@admin_router.callback_query(F.data.startswith("qa:reject:DISABLED_ALL"))
 async def qa_reject_notify(c: CallbackQuery):
     logging.info(f"[REJECT] click data={c.data} from={c.from_user.id}")
     try:
@@ -370,5 +370,6 @@ async def qa_reject_notify(c: CallbackQuery):
             )
         except Exception as e:
             logging.error(f"[REJECT] player notify error: {e}")
+
 
 

@@ -473,3 +473,4 @@ async def _send_my_quests(m: Message):
             reply_markup=quest_actions_kb(qid, q_state if q_state != "approved" else "approved")
         )
 
+
