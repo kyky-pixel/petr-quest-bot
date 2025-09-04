@@ -52,3 +52,29 @@ def admin_review_kb(qid: int) -> InlineKeyboardMarkup:
     ]])
 
 
+# --- patched admin_review_kb (last definition wins) ---
+def admin_review_kb(qid: int):
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    kb = InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="✅ Подтвердить", callback_data=f"qa:approve:{qid}"),
+        InlineKeyboardButton(text="❌ Отклонить",  callback_data=f"qa:reject:{qid}")
+    ]])
+    return kb
+# --- patched quest_actions_kb (последняя версия будет использоваться) ---
+def quest_actions_kb(qid: int, state: str):
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    if state in ("accepted", "returned"):
+        kb = [[
+            InlineKeyboardButton(text="📨 Сдать", callback_data=f"q:submit:{qid}"),
+            InlineKeyboardButton(text="❌ Отказаться", callback_data=f"q:decline:{qid}"),
+        ]]
+    elif state == "pending":
+        kb = [[
+            InlineKeyboardButton(text="✅ Принять", callback_data=f"q:accept:{qid}"),
+            InlineKeyboardButton(text="❌ Отказаться", callback_data=f"q:decline:{qid}"),
+        ]]
+    elif state == "submitted":
+        kb = [[ InlineKeyboardButton(text="⏳ На проверке", callback_data="noop") ]]
+    else:
+        kb = [[ InlineKeyboardButton(text="ℹ️", callback_data="noop") ]]
+    return InlineKeyboardMarkup(inline_keyboard=kb)

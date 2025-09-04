@@ -16,9 +16,7 @@ logging.info("admin_router loaded")
 def is_admin(tg_id: int) -> bool:
     return tg_id in settings.admin_ids
 
-# =========================
-#     СЛУЖЕБНЫЕ КОМАНДЫ
-# =========================
+# ---------------- Служебные ----------------
 @admin_router.message(Command("ping"))
 async def ping(m: Message):
     if not is_admin(m.from_user.id):
@@ -33,9 +31,7 @@ async def whoami(m: Message):
         f"whitelisted={((not settings.whitelist_ids) or (m.from_user.id in settings.whitelist_ids))}"
     )
 
-# =========================
-#        АДМИН-ПАНЕЛЬ
-# =========================
+# ---------------- Панель ----------------
 @admin_router.message(Command("panel"))
 async def panel_cmd(m: Message):
     if not is_admin(m.from_user.id):
@@ -48,31 +44,28 @@ async def panel_cmd(m: Message):
 
 @admin_router.message(F.text == "📝 Ожидают проверки")
 async def pending_review(m: Message):
-    if not is_admin(m.from_user.id):
-        return
+    if not is_admin(m.from_user.id): return
     async with get_db() as db:
         cur = await db.execute(
-            "SELECT q.id, u.name, q.title, q.base_xp FROM quests q "
-            "JOIN users u ON u.id = q.assigned_to "
+            "SELECT q.id, u.name, q.title, q.base_xp "
+            "FROM quests q JOIN users u ON u.id=q.assigned_to "
             "WHERE q.state='submitted' ORDER BY q.id DESC"
         )
         rows = await cur.fetchall()
     if not rows:
         return await m.reply("Нет квестов на проверке.")
     for qid, uname, title, xp in rows:
-        await m.answer(f"#{qid} — {title} (от {uname}) +{xp} XP", reply_markup=admin_review_kb(qid))
+        await m.answer(f"#{qid} — {title} (от {uname}) +{xp} XP",
+                       reply_markup=admin_review_kb(qid))
 
-# =========================
-#    ВЫДАТЬ (временно — МНЕ)
-# =========================
+# ------------- Выдать (временно — МНЕ) -------------
 class GivePetr(StatesGroup):
     wait_title = State()
     wait_xp = State()
 
 @admin_router.message(F.text.in_(["➕ Выдать Пете", "➕ Выдать (временно — мне)"]))
 async def give_start(m: Message, state: FSMContext):
-    if not is_admin(m.from_user.id):
-        return
+    if not is_admin(m.from_user.id): return
     await state.set_state(GivePetr.wait_title)
     await m.reply("Введи заголовок квеста:")
 
@@ -91,10 +84,12 @@ async def give_finish(m: Message, state: FSMContext):
     except Exception:
         xp = 10
 
-    # ЖЁСТКИЙ РЕЖИМ: назначаем квест именно автору команды
+    # ЖЕСТКО: выдаём квест автору команды (тебе)
     async with get_db() as db:
-        # убеждаемся, что автор есть в users
-        cur_self = await db.execute("SELECT id, tg_id, name FROM users WHERE tg_id=?", (m.from_user.id,))
+        cur_self = await db.execute(
+            "SELECT id, tg_id, name FROM users WHERE tg_id=?",
+            (m.from_user.id,)
+        )
         self_row = await cur_self.fetchone()
         if not self_row:
             await db.execute(
@@ -102,12 +97,11 @@ async def give_finish(m: Message, state: FSMContext):
                 (m.from_user.id, f"@{m.from_user.username}" if m.from_user.username else m.from_user.full_name)
             )
             await db.commit()
-            cur_self = await db.execute("SELECT id, tg_id, name FROM users WHERE tg_id=?", (m.from_user.id,))
+            cur_self = await db.execute("SELECT id, tg_id, name FROM users WHERE tg_id=?",(m.from_user.id,))
             self_row = await cur_self.fetchone()
 
         assigned_user_id, assigned_tg_id = self_row[0], self_row[1]
 
-        # создаём квест
         await db.execute(
             "INSERT INTO quests(title, flavor_text, base_xp, tag, deadline_at, state, created_by, assigned_to) "
             "VALUES(?,?,?,?,?,'pending',?,?)",
@@ -118,9 +112,9 @@ async def give_finish(m: Message, state: FSMContext):
         await db.commit()
 
     await state.clear()
+    # Сообщение админу
     await m.reply(f"Квест выдан: #{qid} {title} (+{xp} XP)")
-
-    # Уведомление исполнителю (тебе)
+    # Сообщение ИГРОКУ (в нашем случае — тебе же)
     try:
         await m.bot.send_message(
             assigned_tg_id,
@@ -130,10 +124,8 @@ async def give_finish(m: Message, state: FSMContext):
     except Exception as e:
         logging.error(f"Не удалось уведомить исполнителя {assigned_tg_id}: {e}")
 
-# =========================
-#  ИНЛАЙН: APPROVE / REJECT
-# =========================
-@admin_router.callback_query(F.data.startswith("qa:approve:"))
+# ------------- REVIEW: Approve / Reject -------------
+@admin_router.callback_query(F.data.startswith("qa:approve:DISABLED"))
 async def qa_approve(c: CallbackQuery):
     qid = int(c.data.split(":")[2])
     async with get_db() as db:
@@ -143,13 +135,20 @@ async def qa_approve(c: CallbackQuery):
             return await c.answer("Квест не найден", show_alert=True)
         user_id, base_xp = row
         total = base_xp
+
         curu = await db.execute("SELECT tg_id FROM users WHERE id=?", (user_id,))
         tg_row = await curu.fetchone()
         tg_id = tg_row[0] if tg_row else None
+
         await db.execute("UPDATE quests SET state='approved' WHERE id=?", (qid,))
         await db.execute("UPDATE submissions SET state='approved' WHERE quest_id=?", (qid,))
         await add_xp(db, user_id, total, reason="quest_approved", meta={"quest_id": qid})
+        # Узнаем текущие уровень/опыт после начисления (если есть такие поля)
+        curu2 = await db.execute("SELECT level, xp FROM users WHERE id=?", (user_id,))
+        row2 = await curu2.fetchone()
+        level, xp_val = (row2 or (None, None))
         await db.commit()
+
     await c.answer("Подтверждено ✅")
     try:
         await c.message.edit_text(c.message.text + "\n\n✅ Подтверждено")
@@ -157,11 +156,14 @@ async def qa_approve(c: CallbackQuery):
         pass
     if tg_id:
         try:
-            await c.message.bot.send_message(tg_id, f"✅ Квест #{qid} принят! Начислено {total} XP.")
+            extra = ""
+            if level is not None and xp_val is not None:
+                extra = f"\nТекущий уровень: {level} | Опыт: {xp_val}"
+            await c.message.bot.send_message(tg_id, f"✅ Квест #{qid} принят! Начислено {total} XP.{extra}")
         except Exception as e:
             logging.error(f"Не смог отправить игроку апрув: {e}")
 
-@admin_router.callback_query(F.data.startswith("qa:reject:"))
+@admin_router.callback_query(F.data.startswith("qa:reject:DISABLED"))
 async def qa_reject(c: CallbackQuery):
     qid = int(c.data.split(":")[2])
     async with get_db() as db:
@@ -170,12 +172,15 @@ async def qa_reject(c: CallbackQuery):
         if not row:
             return await c.answer("Квест не найден", show_alert=True)
         user_id = row[0]
+
         curu = await db.execute("SELECT tg_id FROM users WHERE id=?", (user_id,))
         tg_row = await curu.fetchone()
         tg_id = tg_row[0] if tg_row else None
+
         await db.execute("UPDATE submissions SET state='rejected' WHERE quest_id=?", (qid,))
-        await db.execute("UPDATE quests SET state='accepted' WHERE id=?", (qid,))
+        await db.execute("UPDATE quests SET state='returned' WHERE id=?", (qid,))
         await db.commit()
+
     await c.answer("Отклонено ❌")
     try:
         await c.message.edit_text(c.message.text + "\n\n❌ Отклонено")
@@ -186,7 +191,17 @@ async def qa_reject(c: CallbackQuery):
             await c.message.bot.send_message(
                 tg_id,
                 f"❌ Квест #{qid} отклонён. Доработай и сдавай снова.",
-                reply_markup=quest_actions_kb(qid, "accepted")
+                reply_markup=quest_actions_kb(qid, "returned")
             )
         except Exception as e:
             logging.error(f"Не смог отправить игроку реджект: {e}")
+# --- extra logs for approve/reject clicks ---
+@admin_router.callback_query(F.data.startswith("qa:approve:DISABLED"))
+async def __patch_log_approve(c: CallbackQuery):
+    logging.info(f"[ADMIN] approve click from={c.from_user.id} data={c.data}")
+
+@admin_router.callback_query(F.data.startswith("qa:reject:DISABLED"))
+async def __patch_log_reject(c: CallbackQuery):
+    logging.info(f"[ADMIN] reject click from={c.from_user.id} data={c.data}")
+
+

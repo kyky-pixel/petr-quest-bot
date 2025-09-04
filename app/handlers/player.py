@@ -297,3 +297,178 @@ async def quests_cmd_all(m: Message):
 @player_router.message(F.text == "Квесты")
 async def quests_text_btn(m: Message):
     await _send_my_quests(m)
+from aiogram import F
+from aiogram.types import CallbackQuery
+from ..config import settings
+from ..db import get_db
+
+# Игрок нажал "Сдать" (callback "q:submit:<id>")
+@player_router.callback_query(F.data.startswith("q:submit:"))
+async def q_submit(c: CallbackQuery):
+    qid = int(c.data.split(":")[2])
+    async with get_db() as db:
+        # запишем сдачу (если не записана) и переключим состояние
+        await db.execute(
+            "INSERT INTO submissions(quest_id, user_id, state) "
+            "SELECT q.id, q.assigned_to, 'pending' FROM quests q WHERE q.id=? "
+            "ON CONFLICT(quest_id) DO NOTHING",
+            (qid,)
+        )
+        await db.execute("UPDATE quests SET state='submitted' WHERE id=?", (qid,))
+        # Получим инфо для уведомления
+        cur = await db.execute(
+            "SELECT q.id, u.name, q.title, q.base_xp FROM quests q "
+            "JOIN users u ON u.id=q.assigned_to WHERE q.id=?",
+            (qid,)
+        )
+        row = await cur.fetchone()
+        await db.commit()
+
+    await c.answer("Отправлено на проверку ✅", show_alert=False)
+    try:
+        await c.message.edit_text(c.message.text + "\n\n📬 Отправлено на проверку")
+    except Exception:
+        pass
+
+    # нотификация всем админам
+    if row:
+        qid, uname, title, xp = row
+        for aid in settings.admin_ids:
+            try:
+                await c.message.bot.send_message(
+                    aid,
+                    f"🧾 Сдан квест #{qid} — {title} (от {uname}) +{xp} XP",
+                    reply_markup=admin_review_kb(qid)
+                )
+            except Exception as e:
+                logging.error(f"Не смог отправить админу {aid} уведомление о сдаче: {e}")
+# --- notify admins on submit & show "submitted" to player ---
+from aiogram import F
+from aiogram.types import CallbackQuery
+from ..config import settings
+from ..keyboards import admin_review_kb
+
+@player_router.callback_query(F.data.startswith("q:submit:"))
+async def q_submit(c: CallbackQuery):
+    qid = int(c.data.split(":")[2])
+    async with get_db() as db:
+        # фиксируем сдачу и переводим в submitted
+        await db.execute(
+            "INSERT INTO submissions(quest_id, user_id, state) "
+            "SELECT q.id, q.assigned_to, 'pending' FROM quests q WHERE q.id=? "
+            "ON CONFLICT(quest_id) DO NOTHING",
+            (qid,)
+        )
+        await db.execute("UPDATE quests SET state='submitted' WHERE id=?", (qid,))
+        # достанем данные для уведомления
+        cur = await db.execute(
+            "SELECT q.id, u.name, q.title, q.base_xp "
+            "FROM quests q JOIN users u ON u.id=q.assigned_to "
+            "WHERE q.id=?",
+            (qid,)
+        )
+        row = await cur.fetchone()
+        await db.commit()
+
+    await c.answer("Отправлено на проверку ✅")
+    try:
+        await c.message.edit_text(c.message.text + "\n\n📬 Отправлено на проверку")
+    except Exception:
+        pass
+
+    if row:
+        qid, uname, title, xp = row
+        for aid in settings.admin_ids:
+            try:
+                await c.bot.send_message(
+                    aid,
+                    f"🧾 Сдан квест #{qid} — {title} (от {uname}) +{xp} XP",
+                    reply_markup=admin_review_kb(qid)
+                )
+            except Exception as e:
+                logging.error(f"Не смог уведомить админа {aid}: {e}")
+# --- notify admins on submit & show "submitted" to player ---
+from aiogram import F
+from aiogram.types import CallbackQuery
+from ..config import settings
+from ..keyboards import admin_review_kb
+
+@player_router.callback_query(F.data.startswith("q:submit:"))
+async def q_submit(c: CallbackQuery):
+    qid = int(c.data.split(":")[2])
+    async with get_db() as db:
+        # фиксируем сдачу и переводим в submitted
+        await db.execute(
+            "INSERT INTO submissions(quest_id, user_id, state) "
+            "SELECT q.id, q.assigned_to, 'pending' FROM quests q WHERE q.id=? "
+            "ON CONFLICT(quest_id) DO NOTHING",
+            (qid,)
+        )
+        await db.execute("UPDATE quests SET state='submitted' WHERE id=?", (qid,))
+        # достанем данные для уведомления
+        cur = await db.execute(
+            "SELECT q.id, u.name, q.title, q.base_xp "
+            "FROM quests q JOIN users u ON u.id=q.assigned_to "
+            "WHERE q.id=?",
+            (qid,)
+        )
+        row = await cur.fetchone()
+        await db.commit()
+
+    await c.answer("Отправлено на проверку ✅")
+    try:
+        await c.message.edit_text(c.message.text + "\n\n📬 Отправлено на проверку")
+    except Exception:
+        pass
+
+    if row:
+        qid, uname, title, xp = row
+        for aid in settings.admin_ids:
+            try:
+                await c.bot.send_message(
+                    aid,
+                    f"🧾 Сдан квест #{qid} — {title} (от {uname}) +{xp} XP",
+                    reply_markup=admin_review_kb(qid)
+                )
+            except Exception as e:
+                logging.error(f"Не смог уведомить админа {aid}: {e}")
+# --- status labels + последний статус сабмита ---
+def _status_label(q_state: str, s_state: str|None) -> str:
+    # если последний сабмит rejected — показываем "на доработке"
+    if s_state == "rejected":
+        return "на доработке"
+    return {
+        "pending":   "ожидает принятия",
+        "accepted":  "в работе",
+        "submitted": "на проверке",
+        "returned":  "на доработке",
+        "approved":  "принят",
+    }.get(q_state, q_state)
+
+async def _send_my_quests(m: Message):
+    async with get_db() as db:
+        # берём последний сабмит (если есть) и его state
+        cur = await db.execute(
+            """
+            SELECT q.id, q.title, q.state, q.base_xp,
+                   (SELECT s.state FROM submissions s
+                    WHERE s.quest_id = q.id
+                    ORDER BY s.id DESC LIMIT 1) AS last_sub_state
+            FROM quests q
+            JOIN users u ON u.id = q.assigned_to
+            WHERE u.tg_id = ? AND q.state IN ('pending','accepted','submitted','returned')
+            ORDER BY q.id DESC
+            """,
+            (m.from_user.id,)
+        )
+        rows = await cur.fetchall()
+
+    if not rows:
+        return await m.reply("Пока нет активных/ожидающих квестов.")
+
+    for qid, title, q_state, xp, sub_state in rows:
+        label = _status_label(q_state, sub_state)
+        await m.reply(
+            f"#{qid} — {title}\nСтатус: {label}\nXP: +{xp}",
+            reply_markup=quest_actions_kb(qid, q_state if q_state != "approved" else "approved")
+        )
