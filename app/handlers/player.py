@@ -225,7 +225,7 @@ async def _send_my_quests(m: Message):
             SELECT q.id, q.title, q.state, q.base_xp
             FROM quests q
             JOIN users u ON u.id = q.assigned_to
-            WHERE u.tg_id = ? AND q.state IN ('pending','accepted','submitted')
+            WHERE u.tg_id = ? AND q.state IN ('pending','accepted','submitted','returned')
             ORDER BY q.id DESC
             """,
             (m.from_user.id,)
@@ -267,7 +267,7 @@ async def _send_my_quests(m: Message):
             SELECT q.id, q.title, q.state, q.base_xp
             FROM quests q
             JOIN users u ON u.id = q.assigned_to
-            WHERE u.tg_id = ? AND q.state IN ('pending','accepted','submitted')
+            WHERE u.tg_id = ? AND q.state IN ('pending','accepted','submitted','returned')
             ORDER BY q.id DESC
             """,
             (m.from_user.id,)
@@ -472,3 +472,4 @@ async def _send_my_quests(m: Message):
             f"#{qid} — {title}\nСтатус: {label}\nXP: +{xp}",
             reply_markup=quest_actions_kb(qid, q_state if q_state != "approved" else "approved")
         )
+

@@ -144,7 +144,7 @@ async def qa_approve(c: CallbackQuery):
         await db.execute("UPDATE submissions SET state='approved' WHERE quest_id=?", (qid,))
         await add_xp(db, user_id, total, reason="quest_approved", meta={"quest_id": qid})
         # Узнаем текущие уровень/опыт после начисления (если есть такие поля)
-        curu2 = await db.execute("SELECT level, xp FROM users WHERE id=?", (user_id,))
+        curu2 = await db.execute("SELECT level FROM users WHERE id=?", (user_id,))
         row2 = await curu2.fetchone()
         level, xp_val = (row2 or (None, None))
         await db.commit()
@@ -163,7 +163,7 @@ async def qa_approve(c: CallbackQuery):
         except Exception as e:
             logging.error(f"Не смог отправить игроку апрув: {e}")
 
-@admin_router.callback_query(F.data.startswith("qa:reject:DISABLEDDISABLED"))
+@admin_router.callback_query(F.data.startswith("qa:reject:DISABLEDDISABLEDDISABLED"))
 async def qa_reject(c: CallbackQuery):
     qid = int(c.data.split(":")[2])
     async with get_db() as db:
@@ -200,7 +200,7 @@ async def qa_reject(c: CallbackQuery):
 async def __patch_log_approve(c: CallbackQuery):
     logging.info(f"[ADMIN] approve click from={c.from_user.id} data={c.data}")
 
-@admin_router.callback_query(F.data.startswith("qa:reject:DISABLEDDISABLED"))
+@admin_router.callback_query(F.data.startswith("qa:reject:DISABLEDDISABLEDDISABLED"))
 async def __patch_log_reject(c: CallbackQuery):
     logging.info(f"[ADMIN] reject click from={c.from_user.id} data={c.data}")
 
@@ -241,7 +241,7 @@ async def qa_approve(c: CallbackQuery):
         except Exception as e:
             logging.error(f"notify approve failed: {e}")
 
-@admin_router.callback_query(F.data.startswith("qa:reject:"))
+@admin_router.callback_query(F.data.startswith("qa:reject:DISABLED"))
 async def qa_reject(c: CallbackQuery):
     logging.info(f"[REJECT] click data={c.data} from={c.from_user.id}")
     qid = int(c.data.split(":")[2])
@@ -281,56 +281,94 @@ from aiogram.types import CallbackQuery
 
 @admin_router.callback_query(F.data.startswith("qa:approve:"))
 async def qa_approve_notify(c: CallbackQuery):
+    logging.info(f"[APPROVE] click data={c.data} from={c.from_user.id}")
     try:
         qid = int(c.data.split(":")[2])
     except Exception:
         return await c.answer("Некорректный идентификатор", show_alert=True)
 
     async with get_db() as db:
-        # 1) читаем квест и базовый XP
         cur = await db.execute("SELECT assigned_to, base_xp FROM quests WHERE id=?", (qid,))
         row = await cur.fetchone()
         if not row:
             return await c.answer("Квест не найден", show_alert=True)
         user_id, base_xp = row
+        logging.info(f"[APPROVE] qid={qid} user_id={user_id} base_xp={base_xp}")
 
-        # 2) читаем пользователя до начисления (tg_id, уровень, опыт)
-        curu = await db.execute("SELECT tg_id, level, xp FROM users WHERE id=?", (user_id,))
+        curu = await db.execute("SELECT tg_id, level FROM users WHERE id=?", (user_id,))
         urow = await curu.fetchone()
         tg_id = urow[0] if urow else None
         level_before = urow[1] if urow else None
-        xp_before = urow[2] if urow else None
 
-        # 3) меняем состояния, начисляем XP
         await db.execute("UPDATE quests SET state='approved' WHERE id=?", (qid,))
         await db.execute("UPDATE submissions SET state='approved' WHERE quest_id=?", (qid,))
         await add_xp(db, user_id, base_xp, reason="quest_approved", meta={"quest_id": qid})
 
-        # 4) читаем пользователя после начисления
-        cura = await db.execute("SELECT level, xp FROM users WHERE id=?", (user_id,))
+        cura = await db.execute("SELECT level FROM users WHERE id=?", (user_id,))
         arow = await cura.fetchone()
         level_after = arow[0] if arow else None
-        xp_after = arow[1] if arow else None
 
         await db.commit()
 
-    # ---- Фидбек админу ----
     await c.answer("Подтверждено ✅", show_alert=False)
     try:
         await c.message.edit_text(c.message.text + "\n\n✅ Подтверждено")
-    except Exception:
-        pass
+    except Exception as e:
+        logging.info(f"[APPROVE] edit_text error: {e}")
     try:
         await c.message.answer(f"Квест #{qid} подтверждён. Начислено +{base_xp} XP.")
-    except Exception:
-        pass
+    except Exception as e:
+        logging.info(f"[APPROVE] admin notify error: {e}")
 
-    # ---- Уведомление игроку ----
     if tg_id:
         text = f"✅ Квест #{qid} принят! Начислено +{base_xp} XP."
+        if (level_before is not None) and (level_after is not None) and (level_after > level_before):
+            text += f"\n🎉 Уровень повышен до {level_after}!"
         try:
-            if (level_before is not None) and (level_after is not None) and (level_after > level_before):
-                text += f"\n🎉 Уровень повышен: {level_before} → {level_after}!"
             await c.bot.send_message(tg_id, text)
         except Exception as e:
-            logging.error(f"notify player approve failed: {e}")
+            logging.error(f"[APPROVE] player notify error: {e}")
+@admin_router.callback_query(F.data.startswith("qa:reject:"))
+async def qa_reject_notify(c: CallbackQuery):
+    logging.info(f"[REJECT] click data={c.data} from={c.from_user.id}")
+    try:
+        qid = int(c.data.split(":")[2])
+    except Exception:
+        return await c.answer("Некорректный идентификатор", show_alert=True)
+
+    async with get_db() as db:
+        cur = await db.execute("SELECT assigned_to FROM quests WHERE id=?", (qid,))
+        row = await cur.fetchone()
+        if not row:
+            return await c.answer("Квест не найден", show_alert=True)
+        user_id = row[0]
+
+        curu = await db.execute("SELECT tg_id FROM users WHERE id=?", (user_id,))
+        urow = await curu.fetchone()
+        tg_id = urow[0] if urow else None
+
+        await db.execute("UPDATE submissions SET state='rejected' WHERE quest_id=?", (qid,))
+        await db.execute("UPDATE quests SET state='returned' WHERE id=?", (qid,))
+        await db.commit()
+
+    await c.answer("Отклонено ❌", show_alert=False)
+    try:
+        await c.message.edit_text(c.message.text + "\n\n❌ Отклонено")
+    except Exception as e:
+        logging.info(f"[REJECT] edit_text error: {e}")
+    try:
+        await c.message.answer(f"Квест #{qid} отклонён. Вернул на доработку.")
+    except Exception as e:
+        logging.info(f"[REJECT] admin notify error: {e}")
+
+    if tg_id:
+        try:
+            await c.bot.send_message(
+                tg_id,
+                f"❌ Квест #{qid} отклонён. Доработай и сдавай снова.",
+                reply_markup=quest_actions_kb(qid, "returned")
+            )
+        except Exception as e:
+            logging.error(f"[REJECT] player notify error: {e}")
+
+

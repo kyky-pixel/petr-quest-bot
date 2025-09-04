@@ -78,3 +78,10 @@ def quest_actions_kb(qid: int, state: str):
     else:
         kb = [[ InlineKeyboardButton(text="ℹ️", callback_data="noop") ]]
     return InlineKeyboardMarkup(inline_keyboard=kb)
+# --- final admin_review_kb ---
+def admin_review_kb(qid: int):
+    from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="✅ Подтвердить", callback_data=f"qa:approve:{qid}"),
+        InlineKeyboardButton(text="❌ Отклонить",  callback_data=f"qa:reject:{qid}")
+    ]])
