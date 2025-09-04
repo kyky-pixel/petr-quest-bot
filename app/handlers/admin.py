@@ -108,3 +108,8 @@ async def reject_cmd(m: Message):
             )
         except Exception as e:
             logging.error(f"Не смог отправить игроку реджект: {e}")
+@admin_router.message(Command("ping"))
+async def ping(m: Message):
+    if not is_admin(m.from_user.id):
+        return
+    await m.reply("pong")

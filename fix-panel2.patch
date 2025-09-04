@@ -1,0 +1,20 @@
+﻿*** Begin Patch
+*** Update File: app/handlers/admin.py
+@@
+ def is_admin(tg_id: int) -> bool:
+     return tg_id in settings.admin_ids
++
++
++@admin_router.message(Command("ping"))
++async def ping(m: Message):
++    if not is_admin(m.from_user.id):
++        return
++    await m.reply("pong")
++
+ 
+ @admin_router.message(Command("panel"))
+ async def panel_cmd(m: Message):
+     if not is_admin(m.from_user.id):
+         return
+     await m.reply("Админ-панель:", reply_markup=admin_main_kb())
+*** End Patch

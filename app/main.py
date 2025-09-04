@@ -21,18 +21,21 @@ async def main():
         logging.error("BOT_TOKEN пуст. Проверь .env")
         sys.exit(1)
 
-    logging.info(f"Admins: {settings.admin_ids}")
-    logging.info(f"Whitelist: {settings.whitelist_ids}")
-
     await on_startup()
 
     bot = Bot(token=settings.bot_token)
     dp = Dispatcher(storage=MemoryStorage())
 
+    # Логи по старту (для диагностики /panel и WL)
+    logging.info(f"Admins: {settings.admin_ids}")
+    logging.info(f"Whitelist: {settings.whitelist_ids}")
+
+    # Ограничиваем доступ по whitelist (сообщения и коллбэки)
     wl = WhitelistMiddleware()
     dp.message.middleware(wl)
     dp.callback_query.middleware(wl)
 
+    # Подключаем роутеры
     dp.include_router(player_router)
     dp.include_router(admin_router)
 
